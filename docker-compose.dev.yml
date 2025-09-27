@@ -1,0 +1,96 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7
+    container_name: pfc_redis
+    ports: [ "6379:6379" ]
+
+  transaction-service:
+    build: ./personal-finance-control-app/transaction-service
+    container_name: pfc_transaction
+    env_file:
+      - ./personal-finance-control-app/transaction-service/.env
+    environment:
+      MONGO_URI: mongodb://mongo:27017/pfc
+      REDIS_URL: redis://redis:6379/0
+    depends_on: [ mongo, redis ]
+    ports: [ "8001:8001" ]
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+
+  celery-worker:
+    build: ./personal-finance-control-app/transaction-service
+    container_name: pfc_celery_worker
+    env_file:
+      - ./personal-finance-control-app/transaction-service/.env
+    environment:
+      MONGO_URI: mongodb://mongo:27017/pfc
+      REDIS_URL: redis://redis:6379/0
+    depends_on: [ redis, mongo ]
+    command: celery -A app.celery_app.celery_app worker --loglevel=INFO
+
+  flower:
+    image: mher/flower:1.2
+    container_name: pfc_flower
+    environment:
+      - FLOWER_PORT=5555
+      - CELERY_BROKER_URL=redis://redis:6379/0
+    ports:
+      - "5555:5555"
+    depends_on: [ redis ]
+
+  auth-service:
+    build: ./personal-finance-control-app/auth-service
+    container_name: pfc_auth
+    env_file:
+      - ./personal-finance-control-app/auth-service/.env
+    environment:
+      MONGO_URI: mongodb://mongo:27017/pfc
+    depends_on: [ mongo ]
+    ports: [ "8002:8002" ]
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8002 --reload
+
+  user-service:
+    build: ./personal-finance-control-app/user-service
+    container_name: pfc_user
+    env_file:
+      - ./personal-finance-control-app/user-service/.env
+    environment:
+      MONGO_URI: mongodb://mongo:27017/pfc
+    depends_on: [ mongo ]
+    ports: [ "8003:8003" ]
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8003 --reload
+
+  report-service:
+    build: ./personal-finance-control-app/report-service
+    container_name: pfc_report
+    env_file:
+      - ./personal-finance-control-app/report-service/.env
+    environment:
+      MONGO_URI: mongodb://mongo:27017/pfc
+    depends_on: [ mongo ]
+    ports: [ "8004:8004" ]
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8004 --reload
+
+  api-gateway:
+    build: ./personal-finance-control-app/api-gateway
+    container_name: pfc_gateway
+    env_file:
+      - ./personal-finance-control-app/api-gateway/.env
+    environment:
+      # Example pointing to internal service URLs
+      TRANSACTION_SERVICE_URL: http://transaction-service:8001
+      AUTH_SERVICE_URL: http://auth-service:8002
+      USER_SERVICE_URL: http://user-service:8003
+      REPORT_SERVICE_URL: http://report-service:8004
+    depends_on: [ transaction-service, auth-service, user-service, report-service ]
+    ports: [ "8080:8080" ]
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
+
+  frontend:
+    build: ./personal-finance-control-app/frontend
+    container_name: pfc_frontend
+    stdin_open: true
+    tty: true
+    ports: [ "4200:4200" ]
+    command: sh -c "npm install && npm run start -- --host 0.0.0.0"
